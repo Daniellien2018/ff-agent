@@ -1,0 +1,96 @@
+name: Fantasy Football Agent
+
+# Cron times are UTC and currently set for EDT (UTC-4), matching most of the
+# regular season. After the NFL's early-November DST shift (design doc §9),
+# these need to move forward by 1 hour to stay aligned with ET wall-clock
+# times -- update the three `cron:` lines below then. Being off by an hour
+# doesn't break anything (these aren't hard-real-time jobs) but it does drift
+# the intended "10am Sunday" feel.
+#
+#   Sunday 10:00am ET  (lineup)     -> EDT 14:00 UTC / EST 15:00 UTC
+#   Sunday 11:30am ET  (inactives)  -> EDT 15:30 UTC / EST 16:30 UTC  (30min
+#     buffer before the doc's 11:45am target, since Actions cron drifts 5-15min)
+#   Monday 4:00pm ET   (recap)      -> EDT 20:00 UTC / EST 21:00 UTC
+"on":
+  schedule:
+    - cron: "0 14 * * 0"
+    - cron: "30 15 * * 0"
+    - cron: "0 20 * * 1"
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Run one script manually (ignores the cron gating below)"
+        required: true
+        default: weekly_lineup
+        type: choice
+        options: [weekly_lineup, inactives_check, recap]
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  weekly-lineup:
+    if: |
+      github.event.schedule == '0 14 * * 0' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.script == 'weekly_lineup')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: pip install -r requirements.txt
+      - id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      # inactives_check.py (later the same day) needs the snapshot this run
+      # writes to data/cache/ -- runners are stateless between separate
+      # workflow triggers, so hand it off via a date-keyed cache instead.
+      - uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: ff-agent-cache-${{ steps.date.outputs.date }}
+      - run: python scripts/weekly_lineup.py
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+
+  inactives-check:
+    if: |
+      github.event.schedule == '30 15 * * 0' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.script == 'inactives_check')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: pip install -r requirements.txt
+      - id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: ff-agent-cache-${{ steps.date.outputs.date }}
+      - run: python scripts/inactives_check.py
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+
+  recap:
+    if: |
+      github.event.schedule == '0 20 * * 1' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.script == 'recap')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: pip install -r requirements.txt
+      - id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: ff-agent-cache-${{ steps.date.outputs.date }}
+      - run: python scripts/recap.py
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}

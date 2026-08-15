@@ -1,0 +1,129 @@
+# Fantasy Football Agent — locked configuration
+# See fantasy-agent-design.md §0 for provenance of every value here.
+
+league:
+  # Redraft vs. carryover, §0 "Unresolved": recon.py against live data found a
+  # full 15-round snake draft (210 picks = 14 teams x 15 roster spots, matching
+  # exactly) with no is_keeper flags set on any pick. league.settings.draft_rounds
+  # (3) is a stale/misleading field -- the draft object's own settings.rounds (15)
+  # and the actual pick count agree. Working verdict: REDRAFT. max_keepers:1 in
+  # league settings appears to be an unused/future-season toggle, not something
+  # this season's rosters reflect. Still worth a one-line confirmation with the
+  # commissioner before trades.py starts making rest-of-season-only valuations.
+  redraft_or_carryover: "redraft"  # see data/recon/report for evidence
+  # 2025 league only had 12 teams (confirmed live) -- league expanded to 14 for
+  # 2026. Two managers (bigasshamster, percmuncher1) are new and have no 2025
+  # history; league_intel.py handles this by simply omitting them from the
+  # manager report rather than guessing at unknown history.
+  league_id: "1370916469910540288"
+  draft_id: "1370916469918937088"
+  previous_league_id: "1258264260069314560"  # 2025 season, same managers/scoring
+  season: 2026
+  username: "wapen"
+  user_id: "1129342415627833344"
+  name: "VG Premier"
+
+roster:
+  teams: 14
+  starters: 10
+  bench: 5
+  ir_slots: 1
+  starting_positions: ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "FLEX", "K", "DEF"]
+  # CONFIRMED via recon.py against live 2026 league data (both roster "FLEX"
+  # tokens use Sleeper's standard semantics): data/recon/flex_eligibility.json
+  flex_eligible_positions: ["RB", "WR", "TE"]
+
+scoring:
+  # Full PPR. Passing/rush/rec base rates from §0 — used as a sanity check
+  # against whatever Sleeper's `league.scoring_settings` actually returns.
+  ppr: 1.0
+  pass_td: 4
+  pass_yd_per_pt: 25
+  rush_rec_td: 6
+  rush_rec_yd_per_pt: 10
+  # Defense/ST points-allowed bands, per §4.2. Keys are inclusive point ranges.
+  def_points_allowed:
+    "0": 10
+    "1_6": 7
+    "7_13": 4
+    "14_20": 1
+    "21_27": 0
+    "28_34": -1
+    "35_plus": -4
+  def_sack: 1
+  def_int: 2
+  def_td: 6
+
+league_mechanics:
+  waivers:
+    type: "FAAB"
+    budget: 1000
+    min_bid: 0
+    waiver_day_of_week: 1
+    waiver_clear_days: 2
+    # CONFIRMED empirically from 2025 transaction timestamps (16 of 16 weeks):
+    # claims process Tuesday ~07:00-08:00 UTC (~3am ET). data/recon/waiver_timing.json
+    # The recap/FAAB email must land well before Monday evening ET, not "12h before"
+    # measured from Tuesday morning -- send it Monday afternoon ET.
+    confirmed_processing: "Tuesday 07:00-08:00 UTC (~3am ET)"
+  playoffs:
+    teams: 6
+    weeks: [15, 16, 17]
+    byes: 2  # seeds 1-2
+  regular_season_weeks: [1, 14]
+  trade_deadline_week: 13
+  pick_trading_enabled: false
+  trade_veto_votes_needed: 14
+  median_matchups: false
+
+strategy:
+  # Mode thresholds from §2.3 — P(playoffs) bands driving the weekly mode label.
+  modes:
+    - {min_p_playoffs: 0.85, name: "Chase The Bye"}
+    - {min_p_playoffs: 0.30, name: "Win Now"}
+    - {min_p_playoffs: 0.0,  min_week: 11, name: "All-In Variance"}
+    - {min_p_playoffs: 0.0,  min_week: 12, max_p_playoffs: 0.15, name: "Salvage"}
+  acquisition_window_weeks: [10, 13]
+  playoff_targeting_start_week: 8
+
+leverage_thresholds:
+  # Δ P(title), per §4.6
+  critical: 0.010
+  moderate: 0.002
+  marginal: 0.0
+
+simulation:
+  n_trials: 10000
+  early_season_shrinkage_weeks: 4  # §9 "season-sim overconfidence early"
+
+email:
+  to: "daniellien2018+fantasy@gmail.com"
+  # onboarding@resend.dev is Resend's shared test sender -- works with zero
+  # setup but Resend restricts its recipient to the email address you signed
+  # up to Resend with. If `to` above isn't that exact address, verify your
+  # own sending domain in the Resend dashboard and put a real address here
+  # (e.g. "Fantasy Agent <fantasy@yourdomain.com>").
+  from: "Fantasy Agent <onboarding@resend.dev>"
+  subject_prefix: "[FF]"
+  cadence:
+    recap_faab_email: true
+    sunday_lineup_email: true
+    sunday_inactives_email: "conditional"  # only sends if something changed
+  off_by_default:
+    thursday_tnf_check: true
+    monday_mnf_scenarios: true
+    live_in_game_monitoring: true
+
+cache:
+  players_ttl_hours: 24
+  league_data_ttl_hours: 1
+  dir: "data/cache"
+
+# 2026 NFL bye weeks, team abbr -> week number. NOT filled in -- I don't have a
+# verified source for this in-session (no nflverse/schedule integration built
+# yet, and I won't fabricate a schedule). The season is close enough now that
+# the official schedule is public; fill this in from nfl.com/schedules or
+# similar, one line per team, e.g. "KC": 10. Until it's populated,
+# roster.bye_week_crunch() runs but always returns no warnings (fails safe,
+# not silently wrong) -- see src/roster.py's docstring.
+bye_weeks: {}

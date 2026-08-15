@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Sunday 11:45am -- conditional inactives alert. Only emails if something
+  changed since the 10am snapshot. Design doc §5: "its arrival is the signal."
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.ff-agent.inactives-check</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/daniellien/dev/fun/ff_agent/.venv/bin/python3</string>
+		<string>/Users/daniellien/dev/fun/ff_agent/scripts/inactives_check.py</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/daniellien/dev/fun/ff_agent</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>0</integer>
+		<key>Hour</key>
+		<integer>11</integer>
+		<key>Minute</key>
+		<integer>45</integer>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/daniellien/dev/fun/ff_agent/data/logs/inactives_check.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/daniellien/dev/fun/ff_agent/data/logs/inactives_check.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Sunday 10:00am -- lineup + DEF/K stream email. Design doc §5/§7.
+  StartCalendarInterval uses your Mac's LOCAL system timezone, not ET
+  specifically -- if your Mac isn't set to US Eastern, adjust Hour/Minute.
+  Install: see scripts/launchd/README in the chat instructions, or:
+    cp scripts/launchd/*.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.ff-agent.weekly-lineup.plist
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.ff-agent.weekly-lineup</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/daniellien/dev/fun/ff_agent/.venv/bin/python3</string>
+		<string>/Users/daniellien/dev/fun/ff_agent/scripts/weekly_lineup.py</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/daniellien/dev/fun/ff_agent</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>0</integer>
+		<key>Hour</key>
+		<integer>10</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>/Users/daniellien/dev/fun/ff_agent/data/logs/weekly_lineup.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/daniellien/dev/fun/ff_agent/data/logs/weekly_lineup.err.log</string>
+</dict>
+</plist>

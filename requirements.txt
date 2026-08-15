@@ -1,0 +1,8 @@
+requests>=2.31
+PyYAML>=6.0
+python-dotenv>=1.0
+rapidfuzz>=3.6
+numpy>=1.26
+pandas>=2.2
+pytest>=8.0
+pytest-mock>=3.14
