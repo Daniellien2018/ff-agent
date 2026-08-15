@@ -63,6 +63,16 @@ def name_by_roster_id(rosters: list[dict], users: list[dict]) -> dict[int, str]:
     return {r["roster_id"]: name_by_user.get(r.get("owner_id"), "?") for r in rosters}
 
 
+def fetch_current_pts_index(cfg: dict, current_week: int) -> dict[str, float] | None:
+    """player_id -> projected PPR points for the current week, or None if the
+    feed's unavailable (network hiccup, week not yet published, etc.)."""
+    try:
+        projections = fetch_projections(cfg["league"]["season"], current_week, cache_dir=cfg["cache"]["dir"])
+    except ProjectionsUnavailable:
+        return None
+    return build_pts_ppr_index(projections)
+
+
 def compute_current_week_overrides(
     cfg: dict,
     rosters: list[dict],
@@ -70,6 +80,7 @@ def compute_current_week_overrides(
     my_roster_id: int,
     opponent_roster_id: int | None,
     current_week: int,
+    pts_index: dict[str, float] | None = None,
 ) -> tuple[dict[tuple[int, int], float], float | None, float | None]:
     """Real per-player projections (§4.3, Sleeper/RotoWire feed) for THIS week,
     expressed as season_sim weekly_mean_overrides on top of the team-level
@@ -78,13 +89,15 @@ def compute_current_week_overrides(
     from. Returns (overrides, my_real_projection, opponent_real_projection);
     overrides is {} and both projections are None if the feed's unavailable,
     so callers fall back to the plain historical mean rather than crash.
+
+    Pass `pts_index` if the caller already fetched it (e.g. to also run the
+    lineup optimizer) to avoid a redundant fetch; otherwise this fetches it.
     """
-    try:
-        projections = fetch_projections(cfg["league"]["season"], current_week, cache_dir=cfg["cache"]["dir"])
-    except ProjectionsUnavailable:
+    if pts_index is None:
+        pts_index = fetch_current_pts_index(cfg, current_week)
+    if pts_index is None:
         return {}, None, None
 
-    pts_index = build_pts_ppr_index(projections)
     my_roster = next(r for r in rosters if r["roster_id"] == my_roster_id)
     my_proj = roster_projected_total(my_roster.get("starters") or [], pts_index)
     overrides = {(my_roster_id, current_week): my_proj - strengths[my_roster_id].mean}

@@ -8,6 +8,7 @@ from __future__ import annotations
 from src.explain import Decision
 from src.faab import suggest_faab_bid
 from src.league_data import current_position_team, free_agent_kicker_teams, free_agent_teams
+from src.optimizer import compute_lineup_swaps
 from src.season_sim import simulate_season
 from src.streaming import expected_def_points, expected_k_points, rank_defenses, rank_kickers
 
@@ -104,3 +105,56 @@ def build_streaming_decisions(
         watch_items.append(f"K streaming unavailable: {k_rec.reason}")
 
     return changes, watch_items
+
+
+def build_lineup_swap_decisions(
+    cfg: dict,
+    roster: dict,
+    pts_index: dict | None,
+    player_index,
+    roster_id: int,
+    season_data,
+    strengths: dict,
+    baseline_p_title: float,
+    current_week: int,
+    base_overrides: dict | None = None,
+) -> tuple[list[Decision], list[str]]:
+    """RB/WR/TE start-sit, §4.5 (mean-projection slice -- see optimizer.py's
+    docstring for what's not modeled yet: correlation/variance). Each swap is
+    scored independently on top of `base_overrides`, same pattern as
+    build_streaming_decisions, so a DEF stream and a start-sit call in the
+    same email are on the same Δ P(title) footing.
+    """
+    if pts_index is None:
+        return [], ["Start-sit optimization unavailable this run: real per-player projections feed didn't respond."]
+
+    base_overrides = base_overrides or {}
+    n_trials = cfg["simulation"]["n_trials"]
+    slot_positions = cfg["roster"]["starting_positions"]
+    flex_eligible = {"FLEX": cfg["roster"]["flex_eligible_positions"]}
+
+    swaps = compute_lineup_swaps(roster, pts_index, player_index, slot_positions, flex_eligible)
+    decisions = []
+    for swap in swaps:
+        combined_overrides = dict(base_overrides)
+        combined_overrides[(roster_id, current_week)] = combined_overrides.get((roster_id, current_week), 0.0) + swap.delta_pts
+        modified = simulate_season(season_data, strengths, n_trials=n_trials, weekly_mean_overrides=combined_overrides)
+        dpt = modified.p_title[roster_id] - baseline_p_title
+
+        bench_label = swap.bench_name or "empty slot"
+        rationale_bits = [f"Projected {swap.start_pts:.1f} pts vs {swap.bench_pts:.1f} pts this week."]
+        if swap.start_status:
+            rationale_bits.append(f"{swap.start_name} is {swap.start_status}.")
+        if swap.bench_status:
+            rationale_bits.append(f"{bench_label} is {swap.bench_status}.")
+
+        decisions.append(
+            Decision(
+                kind="start_sit",
+                action=f"START {swap.start_name} ({swap.start_pos}) over {bench_label}",
+                delta_p_title=dpt,
+                rationale=" ".join(rationale_bits),
+            )
+        )
+
+    return decisions, []

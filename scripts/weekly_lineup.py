@@ -10,8 +10,12 @@ passed.
 Also writes an injury-status snapshot for inactives_check.py to diff against
 later in the day (§5: the Sunday 11:45am conditional alert).
 
-Full RB/WR/TE start-sit optimization is Phase 4 (optimizer.py, not yet
-built) -- per design doc §3, that's honestly noted rather than faked.
+RB/WR/TE start-sit (Phase 4, mean-projection slice -- see optimizer.py's
+docstring for what's not modeled yet) is included alongside DEF/K streaming.
+Per design doc §4.6, swaps below the "marginal" Δ P(title) threshold are
+folded into a single summary line instead of listed individually -- most
+weeks most decisions are genuine near-ties (§3), and listing them as if they
+mattered just trains you to stop reading.
 """
 
 from __future__ import annotations
@@ -28,9 +32,15 @@ import argparse
 
 import yaml
 
-from src.decisions import build_streaming_decisions
+from src.decisions import build_lineup_swap_decisions, build_streaming_decisions
 from src.email_report import EmailSendError, WeeklyLineupContext, render_lineup_email, send_email
-from src.league_data import compute_current_week_overrides, fetch_prior_from_previous_season, name_by_roster_id
+from src.explain import classify_leverage
+from src.league_data import (
+    compute_current_week_overrides,
+    fetch_current_pts_index,
+    fetch_prior_from_previous_season,
+    name_by_roster_id,
+)
 from src.players import PlayerIndex
 from src.roster import bye_week_crunch, flag_backup_violations, flag_ir_candidates, ir_slot_usage
 from src.season_sim import build_season_data, determine_current_week, determine_mode, estimate_team_strengths, simulate_season
@@ -88,9 +98,11 @@ def main() -> int:
     # teams before any games are played -- every team gets the same shrinkage
     # prior mean. Fold in this week's real per-player projections (§4.3) as a
     # one-week override so this week's numbers (and the P(playoffs)/P(title)
-    # baseline) reflect actual rosters, not a leaguewide average.
+    # baseline) reflect actual rosters, not a leaguewide average. Fetched once
+    # here and reused for the start-sit optimizer below.
+    pts_index = fetch_current_pts_index(cfg, current_week)
     base_overrides, my_real_proj, opp_real_proj = compute_current_week_overrides(
-        cfg, rosters, strengths, MY_ROSTER_ID, opponent_roster_id, current_week
+        cfg, rosters, strengths, MY_ROSTER_ID, opponent_roster_id, current_week, pts_index
     )
     if not base_overrides:
         print("  (real per-player projections unavailable this run -- falling back to the historical team-level model)")
@@ -114,9 +126,14 @@ def main() -> int:
         # P(my_score > opp_score) where the difference is ~Normal(diff_mean, diff_sd^2)
         win_prob = 0.5 * (1 + math.erf(diff_mean / (diff_sd * math.sqrt(2)))) if diff_sd > 0 else 0.5
 
-    changes, watch_items = build_streaming_decisions(
+    streaming_changes, watch_items = build_streaming_decisions(
         cfg, rosters, players_blob, MY_ROSTER_ID, season_data, strengths, p_title, current_week, base_overrides
     )
+    lineup_changes, lineup_watch = build_lineup_swap_decisions(
+        cfg, my_roster, pts_index, idx, MY_ROSTER_ID, season_data, strengths, p_title, current_week, base_overrides
+    )
+    watch_items.extend(lineup_watch)
+    all_changes = streaming_changes + lineup_changes
 
     # --- roster discipline ---
     ir_candidates = flag_ir_candidates(my_roster, idx)
@@ -150,10 +167,17 @@ def main() -> int:
     else:
         watch_items.append("Bye-week crunch check skipped: config.yaml's bye_weeks isn't filled in yet.")
 
-    forced_note = (
-        "Full RB/WR/TE start-sit optimization isn't live yet (Phase 4) — "
-        "review your own lineup manually this week; only DEF/K streaming and roster discipline are automated so far."
-    )
+    # §4.6: below "moderate", a swap is a genuine near-tie -- list it in one
+    # summary line rather than as a full decision block with its own rationale.
+    significant_changes = [c for c in all_changes if classify_leverage(c.delta_p_title, cfg["leverage_thresholds"]) != "marginal"]
+    marginal_changes = [c for c in all_changes if c not in significant_changes]
+
+    if marginal_changes:
+        forced_note = "Also near-ties (<0.2%): " + ", ".join(c.action.replace("START ", "").split(" over ")[0] for c in marginal_changes) + "."
+    elif not all_changes:
+        forced_note = "Lineup is already optimal by projection, and no DEF/K stream beats what's rostered. Nothing to decide this week."
+    else:
+        forced_note = "Rest of lineup is forced -- no other live decisions this week."
 
     ctx = WeeklyLineupContext(
         week=current_week,
@@ -165,7 +189,7 @@ def main() -> int:
         p_playoffs=p_playoffs,
         p_bye=p_bye,
         p_title=p_title,
-        changes=changes,
+        changes=significant_changes,
         forced_note=forced_note,
         watch_items=watch_items,
         mode_note=f"{mode}: see design doc §2.3 for what this optimizes for.",
