@@ -1,21 +1,24 @@
 name: Fantasy Football Agent
 
-# Cron times are UTC and currently set for EDT (UTC-4), matching most of the
-# regular season. After the NFL's early-November DST shift (design doc §9),
-# these need to move forward by 1 hour to stay aligned with ET wall-clock
-# times -- update the three `cron:` lines below then. Being off by an hour
-# doesn't break anything (these aren't hard-real-time jobs) but it does drift
-# the intended "10am Sunday" feel.
+# Automatic scheduling is OFF by design right now -- running this by hand
+# (./run.sh) is the current workflow, and RESEND_API_KEY/ODDS_API_KEY aren't
+# set as repo secrets, so a live cron would just fire and fail on schedule.
+#
+# To turn automation back on: add RESEND_API_KEY and ODDS_API_KEY under
+# Settings -> Secrets and variables -> Actions, then uncomment the
+# `schedule:` block below. Cron times are UTC, written for EDT (UTC-4) --
+# after the NFL's early-November DST shift (design doc §9) they need to move
+# forward by 1 hour to stay aligned with ET wall-clock times:
 #
 #   Sunday 10:00am ET  (lineup)     -> EDT 14:00 UTC / EST 15:00 UTC
 #   Sunday 11:30am ET  (inactives)  -> EDT 15:30 UTC / EST 16:30 UTC  (30min
 #     buffer before the doc's 11:45am target, since Actions cron drifts 5-15min)
 #   Monday 4:00pm ET   (recap)      -> EDT 20:00 UTC / EST 21:00 UTC
 "on":
-  schedule:
-    - cron: "0 14 * * 0"
-    - cron: "30 15 * * 0"
-    - cron: "0 20 * * 1"
+  # schedule:
+  #   - cron: "0 14 * * 0"
+  #   - cron: "30 15 * * 0"
+  #   - cron: "0 20 * * 1"
   workflow_dispatch:
     inputs:
       script:
