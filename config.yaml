@@ -97,7 +97,15 @@ simulation:
   early_season_shrinkage_weeks: 4  # §9 "season-sim overconfidence early"
 
 email:
-  to: "daniellien2018+fantasy@gmail.com"
+  # Resend's shared test sender (onboarding@resend.dev, below) only delivers
+  # to the exact address your Resend account is registered with -- it doesn't
+  # resolve Gmail "+alias" addresses, so this must be the bare address, not
+  # daniellien2018+fantasy@gmail.com. Every email still carries the "[FF]"
+  # subject prefix, so a Gmail filter on "Subject contains [FF]" gets you the
+  # same auto-labeling the +alias would have. Switch back to a +alias (or
+  # anything else) once you verify your own domain in Resend and change
+  # `from` below to an address on it -- then this restriction goes away.
+  to: "daniellien2018@gmail.com"
   # onboarding@resend.dev is Resend's shared test sender -- works with zero
   # setup but Resend restricts its recipient to the email address you signed
   # up to Resend with. If `to` above isn't that exact address, verify your

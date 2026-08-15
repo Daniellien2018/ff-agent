@@ -30,7 +30,7 @@ import yaml
 
 from src.decisions import build_streaming_decisions
 from src.email_report import EmailSendError, WeeklyLineupContext, render_lineup_email, send_email
-from src.league_data import fetch_prior_from_previous_season, name_by_roster_id
+from src.league_data import compute_current_week_overrides, fetch_prior_from_previous_season, name_by_roster_id
 from src.players import PlayerIndex
 from src.roster import bye_week_crunch, flag_backup_violations, flag_ir_candidates, ir_slot_usage
 from src.season_sim import build_season_data, determine_current_week, determine_mode, estimate_team_strengths, simulate_season
@@ -75,12 +75,6 @@ def main() -> int:
     season_data = build_season_data(client, league_id, current_week)
     prior = fetch_prior_from_previous_season(client, cfg["league"]["previous_league_id"], list(range(1, 15)))
     strengths = estimate_team_strengths(season_data, prior, cfg["simulation"]["early_season_shrinkage_weeks"])
-    baseline = simulate_season(season_data, strengths, n_trials=cfg["simulation"]["n_trials"])
-
-    p_playoffs = baseline.p_playoffs[MY_ROSTER_ID]
-    p_bye = baseline.p_bye[MY_ROSTER_ID]
-    p_title = baseline.p_title[MY_ROSTER_ID]
-    mode = determine_mode(p_playoffs, current_week)
 
     opponent_roster_id = None
     for a, b in season_data.schedule.get(current_week, []):
@@ -90,17 +84,38 @@ def main() -> int:
             opponent_roster_id = a
     opponent_name = names.get(opponent_roster_id, "BYE") if opponent_roster_id else "BYE"
 
+    # The team-level historical model above has zero signal to distinguish
+    # teams before any games are played -- every team gets the same shrinkage
+    # prior mean. Fold in this week's real per-player projections (§4.3) as a
+    # one-week override so this week's numbers (and the P(playoffs)/P(title)
+    # baseline) reflect actual rosters, not a leaguewide average.
+    base_overrides, my_real_proj, opp_real_proj = compute_current_week_overrides(
+        cfg, rosters, strengths, MY_ROSTER_ID, opponent_roster_id, current_week
+    )
+    if not base_overrides:
+        print("  (real per-player projections unavailable this run -- falling back to the historical team-level model)")
+
+    baseline = simulate_season(season_data, strengths, n_trials=cfg["simulation"]["n_trials"], weekly_mean_overrides=base_overrides)
+
+    p_playoffs = baseline.p_playoffs[MY_ROSTER_ID]
+    p_bye = baseline.p_bye[MY_ROSTER_ID]
+    p_title = baseline.p_title[MY_ROSTER_ID]
+    mode = determine_mode(p_playoffs, current_week)
+
     my_strength = strengths[MY_ROSTER_ID]
     opp_strength = strengths.get(opponent_roster_id) if opponent_roster_id else None
+    my_projected = my_real_proj if my_real_proj is not None else my_strength.mean
+    opp_projected = (opp_real_proj if opp_real_proj is not None else opp_strength.mean) if opp_strength else None
+
     win_prob = 0.5
     if opp_strength:
-        diff_mean = my_strength.mean - opp_strength.mean
+        diff_mean = my_projected - opp_projected
         diff_sd = (my_strength.var + opp_strength.var) ** 0.5
         # P(my_score > opp_score) where the difference is ~Normal(diff_mean, diff_sd^2)
         win_prob = 0.5 * (1 + math.erf(diff_mean / (diff_sd * math.sqrt(2)))) if diff_sd > 0 else 0.5
 
     changes, watch_items = build_streaming_decisions(
-        cfg, rosters, players_blob, MY_ROSTER_ID, season_data, strengths, p_title, current_week
+        cfg, rosters, players_blob, MY_ROSTER_ID, season_data, strengths, p_title, current_week, base_overrides
     )
 
     # --- roster discipline ---
@@ -144,8 +159,8 @@ def main() -> int:
         week=current_week,
         opponent_name=opponent_name,
         mode=mode,
-        projected=round(my_strength.mean, 1),
-        opponent_projected=round(opp_strength.mean, 1) if opp_strength else 0.0,
+        projected=round(my_projected, 1),
+        opponent_projected=round(opp_projected, 1) if opp_projected is not None else 0.0,
         win_prob=win_prob,
         p_playoffs=p_playoffs,
         p_bye=p_bye,

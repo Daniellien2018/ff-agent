@@ -26,7 +26,7 @@ import yaml
 
 from src.decisions import build_streaming_decisions
 from src.email_report import EmailSendError, RecapContext, render_recap_email, send_email
-from src.league_data import fetch_prior_from_previous_season, name_by_roster_id
+from src.league_data import compute_current_week_overrides, fetch_prior_from_previous_season, name_by_roster_id
 from src.players import PlayerIndex
 from src.roster import rank_bench_by_recent_value
 from src.season_sim import build_season_data, determine_current_week, determine_mode, estimate_team_strengths, simulate_season
@@ -56,12 +56,24 @@ def main() -> int:
     season_data = build_season_data(client, league_id, current_week)
     prior = fetch_prior_from_previous_season(client, cfg["league"]["previous_league_id"], list(range(1, 15)))
     strengths = estimate_team_strengths(season_data, prior, cfg["simulation"]["early_season_shrinkage_weeks"])
-    baseline = simulate_season(season_data, strengths, n_trials=cfg["simulation"]["n_trials"])
+
+    opponent_roster_id = None
+    for a, b in season_data.schedule.get(current_week, []):
+        if a == MY_ROSTER_ID:
+            opponent_roster_id = b
+        elif b == MY_ROSTER_ID:
+            opponent_roster_id = a
+
+    # Same real-projection fold-in as weekly_lineup.py -- keeps the two
+    # emails' Δ P(title) numbers consistent rather than quietly disagreeing.
+    base_overrides, _, _ = compute_current_week_overrides(cfg, rosters, strengths, MY_ROSTER_ID, opponent_roster_id, current_week)
+
+    baseline = simulate_season(season_data, strengths, n_trials=cfg["simulation"]["n_trials"], weekly_mean_overrides=base_overrides)
     p_title = baseline.p_title[MY_ROSTER_ID]
     mode = determine_mode(baseline.p_playoffs[MY_ROSTER_ID], current_week)
 
     faab_targets, stream_notes = build_streaming_decisions(
-        cfg, rosters, players_blob, MY_ROSTER_ID, season_data, strengths, p_title, current_week
+        cfg, rosters, players_blob, MY_ROSTER_ID, season_data, strengths, p_title, current_week, base_overrides
     )
 
     my_roster = next(r for r in rosters if r["roster_id"] == MY_ROSTER_ID)

@@ -7,6 +7,7 @@ duplicate them.
 from __future__ import annotations
 
 from src.players import TEAM_ALIASES
+from src.projections.sleeper_source import ProjectionsUnavailable, build_pts_ppr_index, fetch_projections, roster_projected_total
 from src.season_sim import TeamStrength, estimate_prior_from_scores
 from src.sleeper_client import SleeperClient
 
@@ -60,3 +61,38 @@ def current_position_team(roster: dict, players_blob: dict, position: str) -> st
 def name_by_roster_id(rosters: list[dict], users: list[dict]) -> dict[int, str]:
     name_by_user = {u["user_id"]: (u.get("display_name") or u["user_id"]) for u in users}
     return {r["roster_id"]: name_by_user.get(r.get("owner_id"), "?") for r in rosters}
+
+
+def compute_current_week_overrides(
+    cfg: dict,
+    rosters: list[dict],
+    strengths: dict,
+    my_roster_id: int,
+    opponent_roster_id: int | None,
+    current_week: int,
+) -> tuple[dict[tuple[int, int], float], float | None, float | None]:
+    """Real per-player projections (§4.3, Sleeper/RotoWire feed) for THIS week,
+    expressed as season_sim weekly_mean_overrides on top of the team-level
+    historical model -- which has zero signal to distinguish teams before any
+    games are played, and is otherwise all the "Projected" number is built
+    from. Returns (overrides, my_real_projection, opponent_real_projection);
+    overrides is {} and both projections are None if the feed's unavailable,
+    so callers fall back to the plain historical mean rather than crash.
+    """
+    try:
+        projections = fetch_projections(cfg["league"]["season"], current_week, cache_dir=cfg["cache"]["dir"])
+    except ProjectionsUnavailable:
+        return {}, None, None
+
+    pts_index = build_pts_ppr_index(projections)
+    my_roster = next(r for r in rosters if r["roster_id"] == my_roster_id)
+    my_proj = roster_projected_total(my_roster.get("starters") or [], pts_index)
+    overrides = {(my_roster_id, current_week): my_proj - strengths[my_roster_id].mean}
+
+    opp_proj = None
+    if opponent_roster_id is not None:
+        opp_roster = next(r for r in rosters if r["roster_id"] == opponent_roster_id)
+        opp_proj = roster_projected_total(opp_roster.get("starters") or [], pts_index)
+        overrides[(opponent_roster_id, current_week)] = opp_proj - strengths[opponent_roster_id].mean
+
+    return overrides, my_proj, opp_proj

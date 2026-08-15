@@ -21,7 +21,14 @@ def build_streaming_decisions(
     strengths: dict,
     baseline_p_title: float,
     current_week: int,
+    base_overrides: dict | None = None,
 ) -> tuple[list[Decision], list[str]]:
+    """`base_overrides` and `baseline_p_title` must come from the SAME baseline
+    scenario (e.g. one that already folds in this week's real per-player
+    projections, see league_data.compute_current_week_overrides) -- otherwise
+    the Δ P(title) computed here is comparing apples to a different basket of
+    oranges than what the caller reports as the season baseline.
+    """
     my_roster = next(r for r in rosters if r["roster_id"] == roster_id)
     changes: list[Decision] = []
     watch_items: list[str] = []
@@ -29,6 +36,7 @@ def build_streaming_decisions(
     cache_dir = cfg["cache"]["dir"]
     budget = cfg["league_mechanics"]["waivers"]["budget"]
     leverage_cfg = cfg["leverage_thresholds"]
+    base_overrides = base_overrides or {}
 
     my_def_id = current_position_team(my_roster, players_blob, "DEF")
     def_candidates = list(free_agent_teams(rosters) | ({my_def_id} if my_def_id else set()))
@@ -45,9 +53,9 @@ def build_streaming_decisions(
                 else 0.0
             )
             delta_pts = best["expected_points"] - current_pts
-            modified = simulate_season(
-                season_data, strengths, n_trials=n_trials, weekly_mean_overrides={(roster_id, current_week): delta_pts}
-            )
+            combined_overrides = dict(base_overrides)
+            combined_overrides[(roster_id, current_week)] = combined_overrides.get((roster_id, current_week), 0.0) + delta_pts
+            modified = simulate_season(season_data, strengths, n_trials=n_trials, weekly_mean_overrides=combined_overrides)
             dpt = modified.p_title[roster_id] - baseline_p_title
             bid = suggest_faab_bid(dpt, budget, leverage_cfg, is_streamer=True)
             changes.append(
@@ -78,9 +86,9 @@ def build_streaming_decisions(
                 else 0.0
             )
             delta_pts = best["expected_points"] - current_pts
-            modified = simulate_season(
-                season_data, strengths, n_trials=n_trials, weekly_mean_overrides={(roster_id, current_week): delta_pts}
-            )
+            combined_overrides = dict(base_overrides)
+            combined_overrides[(roster_id, current_week)] = combined_overrides.get((roster_id, current_week), 0.0) + delta_pts
+            modified = simulate_season(season_data, strengths, n_trials=n_trials, weekly_mean_overrides=combined_overrides)
             dpt = modified.p_title[roster_id] - baseline_p_title
             bid = suggest_faab_bid(dpt, budget, leverage_cfg, is_streamer=True)
             changes.append(
